@@ -1,0 +1,16 @@
+[package]
+name = "axum-mcp-demo-stdio"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8.4", features = ["macros", "json"] }
+axum-mcp = { path = "../../axum-mcp", features = ["stdio"] }
+axum-mcp-macros = { path = "../../axum-mcp-macros" }
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "io-std"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+schemars = { version = "1", features = ["derive"] }
+anyhow = "1"
+async-trait = "0.1"
+linkme = "0.3.33"

@@ -1,0 +1,9 @@
+[workspace]
+members = [
+  "axum-mcp",
+  "axum-mcp-macros",
+  "examples/demo",
+  "examples/demo-stdio",
+]
+
+resolver = "2"
