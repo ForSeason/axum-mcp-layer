@@ -1,9 +1,11 @@
+#![allow(clippy::useless_conversion, clippy::collapsible_if)]
+
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, ItemFn, FnArg, Type, ReturnType};
-use syn::punctuated::Punctuated;
-use syn::{Meta, Token, Expr, ExprLit, Lit, Path};
 use syn::parse::Parser;
+use syn::punctuated::Punctuated;
+use syn::{Expr, ExprLit, Lit, Meta, Path, Token};
+use syn::{FnArg, ItemFn, ReturnType, Type, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn mcp_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -19,16 +21,36 @@ pub fn mcp_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     for m in metas {
         match m {
             Meta::NameValue(nv) if nv.path.is_ident("name") => {
-                if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = nv.value { tool_name = Some(s.value()); }
+                if let Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) = nv.value
+                {
+                    tool_name = Some(s.value());
+                }
             }
             Meta::NameValue(nv) if nv.path.is_ident("desc") => {
-                if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = nv.value { tool_desc = Some(s.value()); }
+                if let Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) = nv.value
+                {
+                    tool_desc = Some(s.value());
+                }
             }
             Meta::NameValue(nv) if nv.path.is_ident("state") => {
-                if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = nv.value { state_ty = Some(syn::parse_str(&s.value()).expect("invalid state type path")); }
+                if let Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) = nv.value
+                {
+                    state_ty = Some(syn::parse_str(&s.value()).expect("invalid state type path"));
+                }
             }
             Meta::NameValue(nv) if nv.path.is_ident("structured") => {
-                if let Expr::Lit(ExprLit { lit: Lit::Bool(b), .. }) = nv.value { structured = Some(b.value); }
+                if let Expr::Lit(ExprLit {
+                    lit: Lit::Bool(b), ..
+                }) = nv.value
+                {
+                    structured = Some(b.value);
+                }
             }
             _ => {}
         }
@@ -45,13 +67,19 @@ pub fn mcp_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
             if let Type::Path(tp) = &*pt.ty {
                 let segs = &tp.path.segments;
                 if segs.iter().any(|s| s.ident == "Json") {
-                    if let syn::PathArguments::AngleBracketed(ab) = &segs.last().unwrap().arguments {
-                        if let Some(syn::GenericArgument::Type(t)) = ab.args.first() { json_ty = Some(t.clone()); }
+                    if let syn::PathArguments::AngleBracketed(ab) = &segs.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(t)) = ab.args.first() {
+                            json_ty = Some(t.clone());
+                        }
                     }
                 }
                 if segs.iter().any(|s| s.ident == "State") {
-                    if let syn::PathArguments::AngleBracketed(ab) = &segs.last().unwrap().arguments {
-                        if let Some(syn::GenericArgument::Type(t)) = ab.args.first() { state_param_ty = Some(t.clone()); }
+                    if let syn::PathArguments::AngleBracketed(ab) = &segs.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(t)) = ab.args.first() {
+                            state_param_ty = Some(t.clone());
+                        }
                     }
                 }
                 // Allow presence of Path<_>, Query<_>, Extension<_> in HTTP usage, but they are not supported in MCP bridge.
@@ -63,11 +91,20 @@ pub fn mcp_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         let a = quote!(#attr_state).to_string();
         let b = quote!(#sig_state_opt).to_string();
         if a != b {
-            return syn::Error::new_spanned(&input_fn.sig.ident, format!("#[mcp_tool(state = \"{}\")] does not match State<{}> parameter", a, b)).to_compile_error().into();
+            return syn::Error::new_spanned(
+                &input_fn.sig.ident,
+                format!(
+                    "#[mcp_tool(state = \"{}\")] does not match State<{}> parameter",
+                    a, b
+                ),
+            )
+            .to_compile_error()
+            .into();
         }
     }
     let json_ty = json_ty.expect("#[mcp_tool] requires exactly one axum::Json<T> parameter");
-    let state_param_ty = state_param_ty.expect("#[mcp_tool] requires a State<S> parameter to downcast app_state");
+    let state_param_ty =
+        state_param_ty.expect("#[mcp_tool] requires a State<S> parameter to downcast app_state");
 
     // Parse return type: Json<O> or O
     let (output_ty, _wrap_is_json) = match &input_fn.sig.output {
@@ -75,9 +112,16 @@ pub fn mcp_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
             if let Type::Path(tp) = &**ty {
                 let segs = &tp.path.segments;
                 if segs.iter().any(|s| s.ident == "Json") {
-                    if let syn::PathArguments::AngleBracketed(ab) = &segs.last().unwrap().arguments {
-                        if let Some(syn::GenericArgument::Type(t)) = ab.args.first() { (t.clone(), true) } else { panic!("unable to infer Json<Out> type") }
-                    } else { panic!("expected Json<Out>") }
+                    if let syn::PathArguments::AngleBracketed(ab) = &segs.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(t)) = ab.args.first() {
+                            (t.clone(), true)
+                        } else {
+                            panic!("unable to infer Json<Out> type")
+                        }
+                    } else {
+                        panic!("expected Json<Out>")
+                    }
                 } else {
                     ((**ty).clone(), false)
                 }
@@ -90,7 +134,11 @@ pub fn mcp_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let tool_name_lit = tool_name.unwrap_or_else(|| fn_name.to_string());
     let structured_flag = structured.unwrap_or(false);
-    let tool_desc_tokens = if let Some(d) = tool_desc { quote!{ Some(#d) } } else { quote!{ None } };
+    let tool_desc_tokens = if let Some(d) = tool_desc {
+        quote! { Some(#d) }
+    } else {
+        quote! { None }
+    };
     let handler_ident = format_ident!("{}__mcp_tool_handler", fn_name.to_string());
     let reg_ident = format_ident!("{}_MCP_TOOL", fn_name.to_string().to_uppercase());
     // Link-time duplicate detection symbol removed to avoid unsafe attributes in expansion.
