@@ -1,68 +1,96 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use mcp_protocol_sdk::core::error::McpError;
+use mcp_protocol_sdk::protocol::types::{self, JsonRpcRequest, JsonRpcResponse};
+use mcp_protocol_sdk::transport::stdio::StdioServerTransport;
+use mcp_protocol_sdk::transport::traits::ServerTransport;
+use serde::Deserialize;
+use serde_json::{Value, json};
 
 use crate::registry::ToolRegistry;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use crate::tool::ToolError;
 
-#[derive(Deserialize)]
-struct RawOp {
-    op: String,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    args: Value,
-}
-
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 struct ToolMeta {
     name: String,
-    #[serde(skip_serializing_if = "Option::is_none")] desc: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    desc: Option<&'static str>,
     input_schema: Value,
     output_schema: Value,
     #[serde(rename = "structuredContent")]
     structured: bool,
 }
 
-pub async fn run_stdio(registry: Arc<ToolRegistry>, _state: Arc<dyn Any + Send + Sync>) -> anyhow::Result<()> {
-    let mut stdin = BufReader::new(tokio::io::stdin());
-    let mut stdout = tokio::io::stdout();
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let n = stdin.read_line(&mut line).await?;
-        if n == 0 { break; }
-        let parsed: Result<RawOp, _> = serde_json::from_str(line.trim());
-        let resp = match parsed {
-            Ok(raw) => match raw.op.as_str() {
-                "tools/list" => {
-                    let list = registry.list().await;
-                    let tools: Vec<_> = list.into_iter().map(|(name, desc, i, o)| ToolMeta { name, desc, input_schema: serde_json::to_value(i).unwrap(), output_schema: serde_json::to_value(o).unwrap(), structured: true }).collect();
-                    json!({"tools": tools})
-                }
-                "tools/call" => {
-                    match raw.name {
-                        Some(n) => match registry.call(&n, raw.args).await {
-                            Ok(v) => json!({"ok": true, "result": v}),
-                            Err(e) => {
-                                use crate::tool::ToolError::*;
-                                let code = match e { NotFound(_) => "tool_not_found", InvalidArgs(_) => "invalid_args", Internal(_) => "internal" };
-                                json!({"ok": false, "code": code, "message": e.to_string()})
-                            }
-                        },
-                        None => json!({"ok": false, "code": "invalid_request", "message": "missing name"})
+#[derive(Deserialize)]
+struct CallParams {
+    name: String,
+    #[serde(default)]
+    arguments: Value,
+}
+
+pub async fn run_stdio(
+    registry: Arc<ToolRegistry>,
+    _state: Arc<dyn Any + Send + Sync>,
+) -> anyhow::Result<()> {
+    let handler = {
+        let registry = registry.clone();
+        std::sync::Arc::new(move |req: JsonRpcRequest| {
+            let registry = registry.clone();
+            Box::pin(async move {
+                match req.method.as_str() {
+                    "tools/list" => {
+                        let list = registry.list().await;
+                        let tools: Vec<_> = list
+                            .into_iter()
+                            .map(|(name, desc, i, o)| ToolMeta {
+                                name,
+                                desc,
+                                input_schema: serde_json::to_value(i).unwrap(),
+                                output_schema: serde_json::to_value(o).unwrap(),
+                                structured: true,
+                            })
+                            .collect();
+                        Ok(JsonRpcResponse {
+                            jsonrpc: types::JSONRPC_VERSION.to_string(),
+                            id: req.id,
+                            result: Some(json!({"tools": tools})),
+                        })
                     }
+                    "tools/call" => {
+                        let params_val = req
+                            .params
+                            .clone()
+                            .ok_or_else(|| McpError::protocol("missing params"))?;
+                        let CallParams { name, arguments } = serde_json::from_value(params_val)
+                            .map_err(|e| McpError::protocol(format!("invalid params: {e}")))?;
+                        match registry.call(&name, arguments).await {
+                            Ok(v) => Ok(JsonRpcResponse {
+                                jsonrpc: types::JSONRPC_VERSION.to_string(),
+                                id: req.id,
+                                result: Some(json!({"result": v})),
+                            }),
+                            Err(e) => Err(match e {
+                                ToolError::NotFound(n) => McpError::ToolNotFound(n),
+                                ToolError::InvalidArgs(msg) => McpError::Validation(msg),
+                                ToolError::Internal(msg) => McpError::Internal(msg),
+                            }),
+                        }
+                    }
+                    _ => Err(McpError::protocol(format!(
+                        "Method '{}' not found",
+                        req.method
+                    ))),
                 }
-                _ => json!({"ok": false, "code": "unknown_op", "message": raw.op }),
-            },
-            Err(e) => json!({"ok": false, "code": "invalid_json", "message": e.to_string()}),
-        };
-        let ser = serde_json::to_string(&resp)?;
-        stdout.write_all(ser.as_bytes()).await?;
-        stdout.write_all(b"\n").await?;
-        stdout.flush().await?;
-    }
+            })
+                as std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Result<JsonRpcResponse, McpError>> + Send>,
+                >
+        })
+    };
+
+    let mut transport = StdioServerTransport::new();
+    transport.set_request_handler(handler);
+    transport.start().await?;
     Ok(())
 }

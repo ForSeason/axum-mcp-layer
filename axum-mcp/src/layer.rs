@@ -1,13 +1,15 @@
-use std::task::{Context, Poll};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use axum::body::Body;
-use axum::http::{Request, Response, Method, StatusCode};
+use axum::http::{Method, Request, Response};
 use tower::{Layer, Service};
 
 use crate::http::{handle_post, handle_sse_get};
 use crate::registry::ToolRegistry;
-use crate::security::{AllowedOrigins, Auth, VersionPolicy, REQUIRED_PROTOCOL_VERSION, FALLBACK_PROTOCOL_VERSION};
+use crate::security::{
+    AllowedOrigins, Auth, FALLBACK_PROTOCOL_VERSION, REQUIRED_PROTOCOL_VERSION, VersionPolicy,
+};
 
 #[derive(Clone)]
 pub struct McpLayerConfig {
@@ -21,7 +23,17 @@ pub struct McpLayerConfig {
 
 impl Default for McpLayerConfig {
     fn default() -> Self {
-        Self { path: "/mcp", require_version: true, allowed_origins: AllowedOrigins::LocalhostOnly, enable_sse: false, auth: Auth::None, version_policy: VersionPolicy::AllowFallback { required: REQUIRED_PROTOCOL_VERSION, fallback: FALLBACK_PROTOCOL_VERSION } }
+        Self {
+            path: "/mcp",
+            require_version: true,
+            allowed_origins: AllowedOrigins::LocalhostOnly,
+            enable_sse: false,
+            auth: Auth::None,
+            version_policy: VersionPolicy::AllowFallback {
+                required: REQUIRED_PROTOCOL_VERSION,
+                fallback: FALLBACK_PROTOCOL_VERSION,
+            },
+        }
     }
 }
 
@@ -32,13 +44,20 @@ pub struct McpLayer {
 }
 
 impl McpLayer {
-    pub fn new(registry: Arc<ToolRegistry>, config: McpLayerConfig) -> Self { Self { registry, config } }
+    pub fn new(registry: Arc<ToolRegistry>, config: McpLayerConfig) -> Self {
+        Self { registry, config }
+    }
 }
 
 impl<S> Layer<S> for McpLayer {
     type Service = McpService<S>;
     fn layer(&self, inner: S) -> Self::Service {
-        McpService { inner, registry: self.registry.clone(), config: self.config.clone(), path: self.config.path }
+        McpService {
+            inner,
+            registry: self.registry.clone(),
+            config: self.config.clone(),
+            path: self.config.path,
+        }
     }
 }
 
@@ -60,7 +79,9 @@ where
     type Error = S::Error;
     type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> { self.inner.poll_ready(cx) }
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
         let path = req.uri().path().to_string();
